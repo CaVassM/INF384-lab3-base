@@ -7,21 +7,12 @@ FROM public.ecr.aws/lambda/nodejs:20 AS build
 WORKDIR /build
 
 COPY package.json package-lock.json ./
-
-
 RUN npm ci
 
-# Construccion
 COPY src ./src
-RUN npm run build && npm prune --omit=dev
-
-FROM public.ecr.aws/lambda/nodejs:20 AS runtime
-ENV NODE_ENV=production
-
-COPY --from=build /app/dist ./dist
 
 ### NO TOCAR DE ACA EN ADELANTE, CONSIDEREN QUE EL WORKDIR DEBE SER /build
-RUN npx esbuild src/handler.js \Expand annotationCheck warning on line R21Expand annotationCheck warning on line R21
+RUN npx esbuild src/handler.js \
       --bundle --platform=node --target=node20 \
       --outfile=dist/handler.js
 
