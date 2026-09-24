@@ -2,19 +2,23 @@
 # Contiene cinco malas practicas deliberadas. Cada una lleva su numero en la
 # linea anterior. Corregirlas es el bloque A1 de la guia del laboratorio.
 
-# defecto 1
-FROM public.ecr.aws/lambda/nodejs:latest
+FROM public.ecr.aws/lambda/nodejs:20 AS build
 
-# defecto 2
-COPY . .
+WORKDIR /app
 
-# defecto 3
-RUN npm install
+COPY package.json package-lock.json ./
 
-# defecto 4
-ENV DB_PASSWORD="inf384-clave-en-texto-plano"
 
-# defecto 5
-RUN dnf install -y procps-ng vim && dnf clean all
+RUN npm ci
+
+# Construccion
+COPY src ./src
+RUN npm run build && npm prune --omit=dev
+
+FROM public.ecr.aws/lambda/nodejs:20 AS runtime
+ENV NODE_ENV=production
+
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/node_modules ./node_modules
 
 CMD ["src/handler.handler"]
