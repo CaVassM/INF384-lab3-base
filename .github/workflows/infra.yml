@@ -13,6 +13,11 @@ on:
     paths:
       - 'infra/**'
   workflow_dispatch:
+    inputs:
+      autorizar_destruccion:
+        description: 'Autorizo que este plan destruya o reemplace recursos'
+        type: boolean
+        default: false
 
 jobs:
 
@@ -74,10 +79,16 @@ jobs:
   politicas:
     runs-on: ubuntu-latest
     steps:
-      - name: Sin implementar
-        run: |
-          echo "::error::El job 'politicas' no esta implementado."
-          exit 1
+      - uses: actions/checkout@v4
+
+      # Compuerta de politicas IaC: detiene a partir de severidad HIGH.
+      - name: Analisis de politicas sobre infra/
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: infra
+          severity: HIGH,CRITICAL
+          exit-code: '1'
 
   # TODO
   # Calcular el plan, guardarlo en disco y exportarlo a tfplan.json.
@@ -109,11 +120,93 @@ jobs:
   plan:
     needs: [validar, politicas]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    defaults:
+      run:
+        working-directory: infra
     steps:
-      - name: Sin implementar
+      - uses: actions/checkout@v4
+
+      - name: Credenciales temporales
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Init contra el backend remoto
+        run: terraform init -input=false -backend-config=backend.hcl
+
+      - name: Calcular y guardar el plan
         run: |
-          echo "::error::El job 'plan' no esta implementado."
-          exit 1
+          terraform plan -input=false -out=tfplan
+          terraform show -json tfplan > tfplan.json
+          terraform show -no-color tfplan > tfplan.txt
+
+      # Regla 2: informa. Va antes de la regla 1 para que el plan quede
+      # visible aunque la compuerta detenga.
+      - name: Publicar el plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo '### Plan de Terraform'
+            echo
+            echo '```'
+            head -c 60000 tfplan.txt
+            echo '```'
+          } > comentario.md
+
+          cat comentario.md >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            gh pr comment "${{ github.event.pull_request.number }}" \
+              --repo "${{ github.repository }}" --body-file comentario.md
+          fi
+
+      # Regla 1: detiene. Un reemplazo (delete + create) cuenta como destruccion.
+      # La autorizacion solo llega por disparo manual con la casilla marcada.
+      - name: Regla 1 - ninguna destruccion sin autorizacion
+        env:
+          EVENTO: ${{ github.event_name }}
+          AUTORIZADO: ${{ inputs.autorizar_destruccion }}
+        run: |
+          destrucciones="$(jq -r '
+            (.resource_changes // [])[]
+            | select(.change.actions | index("delete"))
+            | "\(.address): \(.change.actions | join(","))"
+          ' tfplan.json)"
+
+          if [ -z "$destrucciones" ]; then
+            echo "El plan no destruye ni reemplaza recursos."
+            exit 0
+          fi
+
+          if [ "$EVENTO" = "workflow_dispatch" ] && [ "$AUTORIZADO" = "true" ]; then
+            echo "::warning::Destruccion autorizada manualmente por ${{ github.actor }}:"
+            echo "$destrucciones"
+          else
+            echo "::error::El plan destruye o reemplaza recursos sin autorizacion:"
+            echo "$destrucciones"
+            exit 1
+          fi
+
+      - name: Guardar el plan aprobado
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: |
+            infra/tfplan
+            infra/.terraform.lock.hcl
+          retention-days: 1
 
   # TODO
   # Aplicar el plan que produjo el job anterior, sin recalcularlo.
@@ -124,8 +217,35 @@ jobs:
     needs: plan
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
     steps:
-      - name: Sin implementar
-        run: |
+      - uses: actions/checkout@v4
+
+      - name: Credenciales temporales
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Recuperar el plan aprobado
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: infra
+
+      - name: Init contra el backend remoto
+        run: terraform init -input=false -backend-config=backend.hcl
+
+      - name: Aplicar el plan guardado
+        run: terraform apply -input=false tfplan
           echo "::error::El job 'aplicar' no esta implementado."
           exit 1
