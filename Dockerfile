@@ -4,7 +4,7 @@
 
 FROM public.ecr.aws/lambda/nodejs:20 AS build
 
-WORKDIR /app
+WORKDIR /build
 
 COPY package.json package-lock.json ./
 
@@ -20,4 +20,13 @@ ENV NODE_ENV=production
 
 COPY --from=build /app/dist ./dist
 
-CMD ["dist/handler.handler"]
+### NO TOCAR DE ACA EN ADELANTE, CONSIDEREN QUE EL WORKDIR DEBE SER /build
+RUN npx esbuild src/handler.js \Expand annotationCheck warning on line R21Expand annotationCheck warning on line R21
+      --bundle --platform=node --target=node20 \
+      --outfile=dist/handler.js
+
+# Etapa final: recibe unicamente el artefacto empaquetado.
+# El arbol de node_modules se queda en la etapa anterior.
+FROM public.ecr.aws/lambda/nodejs:20 AS runtime
+COPY --from=build /build/dist/handler.js ${LAMBDA_TASK_ROOT}/
+CMD ["handler.handler"]
