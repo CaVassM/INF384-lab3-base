@@ -7,3 +7,26 @@
 #
 # Sintaxis: un patron por linea, con la misma forma que .gitignore.
 # TODO
+# Dependencias locales (se instalan dentro del contenedor con npm ci)
+node_modules
+
+# Control de versiones
+.git
+.gitignore
+
+# Variables de entorno / secretos locales
+.env
+.env.*
+
+# Artefactos de build locales (se generan dentro del contenedor)
+dist
+build
+
+# Logs y temporales
+npm-debug.log*
+*.log
+
+# Editor / SO
+.vscode
+.idea
+.DS_Store
