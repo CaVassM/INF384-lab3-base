@@ -236,6 +236,7 @@ jobs:
         with:
           terraform_wrapper: false
 
+      # El plan que se aplica es el que aprobo el job plan, no uno nuevo.
       - name: Recuperar el plan aprobado
         uses: actions/download-artifact@v4
         with:
@@ -247,5 +248,3 @@ jobs:
 
       - name: Aplicar el plan guardado
         run: terraform apply -input=false tfplan
-          echo "::error::El job 'aplicar' no esta implementado."
-          exit 1
