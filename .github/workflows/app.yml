@@ -199,13 +199,58 @@ jobs:
   #
   # Sustituir el paso centinela por la implementacion.
   publicar:
+    needs: [secretos, dependencias, estatico, calidad]
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    env:
+      APLICACION: inf384-lab3
+    outputs:
+      digest: ${{ steps.referencia.outputs.digest }}
     steps:
-      - name: Sin implementar
-        run: |
-          echo "::error::El job 'publicar' no esta implementado."
-          exit 1
+      - uses: actions/checkout@v4
 
+      - name: Credenciales temporales
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Login en ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Preparar buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Tag del commit
+        id: tags
+        run: echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Construir y publicar con el tag del commit
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          labels: org.opencontainers.image.title=${{ env.APLICACION }}
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.APLICACION }}:${{ steps.tags.outputs.sha }}
+
+      - name: Apuntar prd al manifiesto publicado
+        run: |
+          docker buildx imagetools create \
+            -t "${{ steps.ecr.outputs.registry }}/${APLICACION}:prd" \
+            "${{ steps.ecr.outputs.registry }}/${APLICACION}@${{ steps.build.outputs.digest }}"
+
+      - name: Referencia por digest
+        id: referencia
+        run: |
+          echo "digest=${{ steps.ecr.outputs.registry }}/${APLICACION}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+          
   # Este job viene completo y no se modifica.
   # Las estrategias de despliegue y la verificacion posterior son contenido
   # de la sesion 6. La pregunta de reflexion 2 pide leerlo.
